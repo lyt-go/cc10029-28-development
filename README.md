@@ -11,11 +11,14 @@
 .
 ├── frontend/                 Vue 3 + Vite + TypeScript 前端
 │   ├── src/views/WorkbenchView.vue|tsx  全部模块共享工作台
+│   ├── src/views/ReplayConsole.vue      历史重放凭据/转交/回执控制台
 │   ├── src/data/modules.ts              18个业务模块配置
+│   ├── src/data/types.ts                工作台与重放接口类型
 │   ├── src/api/              统一请求封装
 │   └── vite.config.ts        dev server 配置（open: false）
 ├── backend/                  FastAPI（Python） 后端
 │   ├── app/routers/resource.py  通用查询/导出/登记/动作接口
+│   ├── app/routers/exchange_replay.py  历史重放凭据/转交/回执/审批接口
 │   ├── app/services/<key>.py    每个模块独立领域逻辑
 │   ├── app/services/base.py     共享服务骨架
 │   └── app/store.py          内存数据仓库与示例数据
@@ -68,6 +71,28 @@ npm run dev
 | 历史重放 | `exchange_replay` | 重放任务 | 重放编号、归档编号、重放范围 |
 | 时效监控 | `sla_monitor` | 时效指标 | 指标编号、源端编号、约定到达时限 |
 | 通道配置 | `channel_config` | 传输通道 | 通道编号、传输协议、并发连接数 |
+
+## 历史重放：按批次归属授权的可回取范围
+
+归档卷可以混有不同源端的批次。`history_archive` 在创建/执行归档时逐成员登记
+血缘明细（源端、目标端、链路），历史重放不再按整卷一刀切，而是按成员批次授权：
+
+1. **签发重放可回取范围凭据**（`POST /api/exchange_replay/credentials`）
+   按成员批次登记源端血缘、当时归属、一次性回取资格；签发对象必须是成员当前归属方。
+2. **批次转交**（`POST /api/exchange_replay/handovers`）
+   只变更归属，默认**不撤销**旧任务凭据；只有显式 `revoke_old_credential=true` 才撤销。
+3. **创建并执行重放**（`POST /api/exchange_replay/tasks`、`POST /{id}/execute`）
+   逐成员校验当前归属：归属一致的成员才写入接收方目标产物（`data/replay/<重放编号>/<接收方>.jsonl`）；
+   受转交影响或权限冲突的成员不写入，登记待审批事项并写明未取原因。
+   归档卷已进入凭据管理后，没有凭据的任务不会再按整卷兜底回放。
+4. **交付回执**（`GET /api/exchange_replay/receipts/{回执编号}`）
+   冻结生成当时的凭据状态与可回取范围；交接前签出的进行中任务会在回执里说明
+   原凭据仍可用于哪些成员、哪些成员自交接时点起需由现接收方重新许可。
+5. **目标数据与审批核对**（`GET /api/exchange_replay/{id}/delivery`、`/{id}/target-data`）
+   对照实际写入条数、待补审批笔数与回执当时资格。
+
+内部账本（`_replay_credentials`、`_replay_handovers`、`_replay_receipts`、
+`_replay_approvals`）以下划线开头，不进入 18 个业务模块清单与运营概览。
 
 ## 约定
 
